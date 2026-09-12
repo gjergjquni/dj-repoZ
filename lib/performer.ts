@@ -10,7 +10,16 @@ export type PerformerEvents = {
   onEnd?: () => void;
 };
 
-export const STEPS = 64; // 4-bar loop, 16th-note grid
+export type DeckBus = "rhythm" | "melody";
+
+export const LOOP_BARS = 4;
+export const STEPS_PER_BAR = 16;
+export const STEPS = LOOP_BARS * STEPS_PER_BAR;
+
+/** 4 bars of 4/4 at the given BPM. */
+export function loopSecondsFor(bpm: number): number {
+  return (60 / bpm) * LOOP_BARS * 4;
+}
 
 /**
  * Pure instrumental DJ engine.
@@ -24,6 +33,10 @@ export class Performer {
   private disposables: { dispose(): void }[] = [];
   private tickRaf = 0;
   playing = false;
+  rhythmGainBoost = 1;
+  melodyGainBoost = 1;
+  private rhythmVol: Tone.Volume | null = null;
+  private melodyVol: Tone.Volume | null = null;
 
   constructor(plan: DJPlan, events: PerformerEvents = {}) {
     this.plan = plan;
@@ -49,7 +62,13 @@ export class Performer {
 
     const master = new Tone.Gain(0.85).toDestination();
     const comp = new Tone.Compressor(-18, 3).connect(master);
-    this.disposables.push(master, comp);
+    const rhythmVol = new Tone.Volume(0).connect(comp);
+    const melodyVol = new Tone.Volume(0).connect(comp);
+    this.rhythmVol = rhythmVol;
+    this.melodyVol = melodyVol;
+    rhythmVol.volume.value = Tone.gainToDb(Math.max(this.rhythmGainBoost, 0.001));
+    melodyVol.volume.value = Tone.gainToDb(Math.max(this.melodyGainBoost, 0.001));
+    this.disposables.push(master, comp, rhythmVol, melodyVol);
 
     // ---------- chords per tier (one chord per bar) ----------
     const PROGRESSIONS: Record<string, string[][]> = {
@@ -84,15 +103,15 @@ export class Performer {
       octaves: 6,
       envelope: { attack: 0.001, decay: tier === "clean" ? 0.5 : 0.32, sustain: 0 },
       volume: -4,
-    }).connect(comp);
+    }).connect(rhythmVol);
 
     const snare = new Tone.NoiseSynth({
       noise: { type: "white" },
       envelope: { attack: 0.001, decay: 0.12, sustain: 0 },
       volume: tier === "clean" ? -18 : -8,
-    }).connect(comp);
+    }).connect(rhythmVol);
 
-    const hatCrush = new Tone.BitCrusher(has("bitcrushed") || has("chiptune") ? 4 : 16).connect(comp);
+    const hatCrush = new Tone.BitCrusher(has("bitcrushed") || has("chiptune") ? 4 : 16).connect(rhythmVol);
     const hat = new Tone.NoiseSynth({
       noise: { type: "white" },
       envelope: { attack: 0.001, decay: 0.03, sustain: 0 },
@@ -128,7 +147,7 @@ export class Performer {
     // ---------- bass ----------
     const bassIs808 = has("808");
     const bassDistorted = has("distorted") || has("industrial");
-    const bassDist = new Tone.Distortion(bassDistorted ? 0.6 : 0).connect(comp);
+    const bassDist = new Tone.Distortion(bassDistorted ? 0.6 : 0).connect(rhythmVol);
     const bass = bassIs808
       ? new Tone.MembraneSynth({
           pitchDecay: 0.08,
@@ -167,12 +186,12 @@ export class Performer {
       modulationIndex: wantsPiano ? 8 : 4,
       envelope: { attack: wantsPiano ? 0.004 : 0.02, decay: 0.7, sustain: 0.12, release: 0.6 },
       volume: -16,
-    } as any).connect(comp);
+    } as any).connect(melodyVol);
     this.disposables.push(keySynth);
 
     let pad: Tone.PolySynth | null = null;
     if (wantsPad) {
-      const padFilter = new Tone.Filter(900, "lowpass").connect(comp);
+      const padFilter = new Tone.Filter(900, "lowpass").connect(melodyVol);
       pad = new Tone.PolySynth(Tone.Synth, {
         oscillator: { type: "sawtooth" },
         envelope: { attack: 0.6, decay: 0.5, sustain: 0.5, release: 1.2 },
@@ -183,7 +202,7 @@ export class Performer {
 
     let stab: Tone.MonoSynth | null = null;
     if (wantsGuitarStab) {
-      const stabDist = new Tone.Distortion(0.8).connect(comp);
+      const stabDist = new Tone.Distortion(0.8).connect(melodyVol);
       stab = new Tone.MonoSynth({
         oscillator: { type: "sawtooth" },
         filter: { type: "lowpass", Q: 4 } as any,
@@ -203,8 +222,8 @@ export class Performer {
     let lead: Tone.Synth | null = null;
     if (wantsArp || wantsChip) {
       const leadOut: Tone.ToneAudioNode = wantsChip
-        ? new Tone.BitCrusher(4).connect(comp)
-        : new Tone.Filter(2400, "lowpass").connect(comp);
+        ? new Tone.BitCrusher(4).connect(melodyVol)
+        : new Tone.Filter(2400, "lowpass").connect(melodyVol);
       lead = new Tone.Synth({
         oscillator: { type: wantsChip ? "square" : "triangle" },
         envelope: { attack: 0.002, decay: 0.09, sustain: 0, release: 0.05 },
@@ -218,12 +237,12 @@ export class Performer {
       oscillator: { type: "sine" },
       envelope: { attack: 0.001, decay: 0.12, sustain: 0, release: 0.08 },
       volume: -16,
-    }).connect(comp);
+    }).connect(melodyVol);
     const glitch = new Tone.NoiseSynth({
       noise: { type: "pink" },
       envelope: { attack: 0.001, decay: 0.05, sustain: 0 },
       volume: -18,
-    }).connect(comp);
+    }).connect(melodyVol);
     this.disposables.push(sfxSynth, glitch);
 
     if (analysis.project_type === "library") {
@@ -298,7 +317,7 @@ export class Performer {
 
     t.start("+0.05");
 
-    const loopSeconds = (60 / spec.bpm) * 16; // 4 bars of 4/4
+    const loopSeconds = loopSecondsFor(spec.bpm);
     const tick = () => {
       if (!this.playing) return;
       const secs = t.seconds % loopSeconds;
@@ -323,6 +342,19 @@ export class Performer {
       }
     }
     this.disposables = [];
+    this.rhythmVol = null;
+    this.melodyVol = null;
     this.events.onEnd?.();
+  }
+
+  setDeckVolume(side: DeckBus, gain: number) {
+    const db = Tone.gainToDb(Math.max(gain, 0.001));
+    if (side === "rhythm") {
+      this.rhythmGainBoost = gain;
+      if (this.rhythmVol) this.rhythmVol.volume.value = db;
+    } else {
+      this.melodyGainBoost = gain;
+      if (this.melodyVol) this.melodyVol.volume.value = db;
+    }
   }
 }

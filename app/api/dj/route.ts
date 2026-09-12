@@ -1,22 +1,21 @@
 import { promises as fs } from "fs";
 import { NextRequest, NextResponse } from "next/server";
 import path from "path";
-import { composeBattle } from "@/lib/battle";
-import { scoutRepo } from "@/lib/scout";
-import { JokeTankSchema } from "@/lib/types";
+import { analyzeSnapshot, fetchSnapshot } from "@/services/github-analyzer";
+import { mapToAudioSpec } from "@/services/dj-sound-mapper";
+import { DJPlanSchema, RawRepoSnapshotSchema } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-const FIXTURES = ["student-mess.json", "linux-ish.json", "react-ish.json"];
+const FIXTURES = ["clean-lib", "ml-lab", "student-mess"];
 
 async function loadFixture(name?: string) {
-  const file =
-    name && FIXTURES.includes(name + ".json") ? name + ".json" : FIXTURES[0];
+  const file = name && FIXTURES.includes(name) ? name : FIXTURES[0];
   const raw = await fs.readFile(
-    path.join(process.cwd(), "fixtures", file),
+    path.join(process.cwd(), "fixtures", `${file}.json`),
     "utf8"
   );
-  return JokeTankSchema.parse(JSON.parse(raw));
+  return RawRepoSnapshotSchema.parse(JSON.parse(raw));
 }
 
 export async function GET(req: NextRequest) {
@@ -26,14 +25,13 @@ export async function GET(req: NextRequest) {
   const repo = searchParams.get("repo")?.trim();
 
   try {
-    let tank;
+    let snapshot;
     if (demo) {
-      tank = await loadFixture(searchParams.get("fixture") ?? undefined);
+      snapshot = await loadFixture(searchParams.get("fixture") ?? undefined);
     } else if (owner && repo) {
       try {
-        tank = await scoutRepo(owner, repo);
+        snapshot = await fetchSnapshot(owner, repo);
       } catch (e) {
-        // Wi-Fi death / rate limit → fixtures still demo
         return NextResponse.json(
           { error: `GitHub fetch failed: ${(e as Error).message}. Try ?demo=1.` },
           { status: 502 }
@@ -46,8 +44,9 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const plan = await composeBattle(tank);
-    return NextResponse.json(plan);
+    const analysis = analyzeSnapshot(snapshot);
+    const spec = mapToAudioSpec(analysis);
+    return NextResponse.json(DJPlanSchema.parse({ analysis, spec }));
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }

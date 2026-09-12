@@ -1,9 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Performer } from "@/lib/performer";
-import { BAR_SECONDS, TOTAL_SECONDS } from "@/lib/score";
-import type { Bar, BattlePlan } from "@/lib/types";
+import { Performer, STEPS } from "@/lib/performer";
+import type { DJPlan } from "@/lib/types";
 
 function parseRepoInput(raw: string): { owner: string; repo: string } | null {
   const t = raw.trim();
@@ -14,48 +13,40 @@ function parseRepoInput(raw: string): { owner: string; repo: string } | null {
   return { owner: m[1], repo: m[2].replace(/\.git$/, "") };
 }
 
-/** Render bar text with the verbatim quote highlighted. */
-function BarText({ bar }: { bar: Bar }) {
-  const i = bar.text.indexOf(bar.quote);
-  if (i < 0 || bar.quote.length === 0) return <>{bar.text}</>;
-  return (
-    <>
-      {bar.text.slice(0, i)}
-      <span className="q">{bar.quote}</span>
-      {bar.text.slice(i + bar.quote.length)}
-    </>
-  );
-}
-
 const FIXTURES = [
+  { id: "clean-lib", label: "clean rust lib" },
+  { id: "ml-lab", label: "ml lab" },
   { id: "student-mess", label: "student repo" },
-  { id: "linux-ish", label: "linux-ish" },
-  { id: "react-ish", label: "react-ish" },
 ];
+
+const BREAKDOWN_LABELS: Record<string, string> = {
+  issuePressure: "open issue pressure",
+  churn: "commit churn",
+  treeDepth: "directory depth",
+  testGap: "missing tests",
+};
 
 export default function Home() {
   const [input, setInput] = useState("");
-  const [plan, setPlan] = useState<BattlePlan | null>(null);
+  const [plan, setPlan] = useState<DJPlan | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [playing, setPlaying] = useState(false);
-  const [currentBar, setCurrentBar] = useState(-1);
-  const [firedBars, setFiredBars] = useState<Set<number>>(new Set());
+  const [step, setStep] = useState(-1);
   const [playhead, setPlayhead] = useState(0);
-  const [showSources, setShowSources] = useState(false);
-  const [emphasis, setEmphasis] = useState<"none" | "hype" | "diss">("none");
+  const [loopSeconds, setLoopSeconds] = useState(1);
+  const [copied, setCopied] = useState(false);
   const performerRef = useRef<Performer | null>(null);
 
   const load = useCallback(async (qs: string) => {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(`/api/battle?${qs}`);
+      const res = await fetch(`/api/dj?${qs}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
-      setPlan(data as BattlePlan);
-      setCurrentBar(-1);
-      setFiredBars(new Set());
+      setPlan(data as DJPlan);
+      setStep(-1);
       setPlayhead(0);
     } catch (e) {
       setError((e as Error).message);
@@ -72,7 +63,9 @@ export default function Home() {
         setError("paste owner/repo or a github.com URL");
         return;
       }
-      load(`owner=${encodeURIComponent(parsed.owner)}&repo=${encodeURIComponent(parsed.repo)}`);
+      load(
+        `owner=${encodeURIComponent(parsed.owner)}&repo=${encodeURIComponent(parsed.repo)}`
+      );
     },
     [input, load]
   );
@@ -85,17 +78,15 @@ export default function Home() {
   const play = useCallback(async () => {
     if (!plan) return;
     stop();
-    setCurrentBar(-1);
-    setFiredBars(new Set());
     const p = new Performer(plan, {
-      onBar: (i) => {
-        setCurrentBar(i);
-        setFiredBars((prev) => new Set(prev).add(i));
+      onStep: setStep,
+      onTick: (secs, loop) => {
+        setPlayhead(secs);
+        setLoopSeconds(loop);
       },
-      onTick: setPlayhead,
       onEnd: () => {
         setPlaying(false);
-        setCurrentBar(-1);
+        setStep(-1);
         setPlayhead(0);
       },
     });
@@ -113,27 +104,12 @@ export default function Home() {
     }
   }, [playing, play, stop]);
 
-  // keyboard: space play/stop, D diss emphasis, H hype emphasis
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.tagName === "INPUT") return;
       if (e.code === "Space") {
         e.preventDefault();
         togglePlay();
-      } else if (e.key.toLowerCase() === "d") {
-        setEmphasis((cur) => {
-          const next = cur === "diss" ? "none" : "diss";
-          performerRef.current?.setSideVolume("diss", next === "diss" ? 1 : 0.9);
-          performerRef.current?.setSideVolume("hype", next === "diss" ? 0.35 : 0.9);
-          return next;
-        });
-      } else if (e.key.toLowerCase() === "h") {
-        setEmphasis((cur) => {
-          const next = cur === "hype" ? "none" : "hype";
-          performerRef.current?.setSideVolume("hype", next === "hype" ? 1 : 0.9);
-          performerRef.current?.setSideVolume("diss", next === "hype" ? 0.35 : 0.9);
-          return next;
-        });
       }
     };
     window.addEventListener("keydown", onKey);
@@ -142,25 +118,33 @@ export default function Home() {
 
   useEffect(() => () => performerRef.current?.stop(), []);
 
-  const liveBar = plan?.bars.find((b) => b.barIndex === currentBar);
-  const liveSourceIds = new Set(liveBar?.sourceIds ?? []);
-  const kickOn = playing && (playhead % BAR_SECONDS) < 0.2;
+  const copyPrompt = useCallback(async () => {
+    if (!plan) return;
+    await navigator.clipboard.writeText(plan.spec.prompt_string);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }, [plan]);
+
+  const currentBar = step >= 0 ? Math.floor(step / 16) : -1;
+  const kickOn = playing && step >= 0 && step % 4 === 0;
 
   return (
     <main>
       <header className="topbar">
         <span className="brand">
-          blame<span className="box">box</span>
+          repo<span className="box">dj</span>
         </span>
-        <span className="subtitle">git log, but it fights you</span>
+        <span className="subtitle">your codebase, but it slaps</span>
         {plan && (
           <>
             <span className="breadcrumb">
-              {plan.tank.owner} / <b>{plan.tank.repo}</b>
+              {plan.analysis.owner} / <b>{plan.analysis.repo}</b>
             </span>
-            <span className="stars">★ {plan.tank.stars.toLocaleString()}</span>
-            <span className={`badge ${plan.assembler}`}>
-              assembler: {plan.assembler}
+            <span className="stars">
+              ★ {plan.analysis.stars.toLocaleString()}
+            </span>
+            <span className={`badge ${plan.spec.tier}`}>
+              {plan.spec.tier} · {plan.analysis.messiness_score}/100
             </span>
           </>
         )}
@@ -171,7 +155,7 @@ export default function Home() {
             onClick={togglePlay}
             disabled={loading}
           >
-            {playing ? "Stop blame" : "Play blame"}
+            {playing ? "Stop set" : "Spin repo"}
           </button>
         )}
       </header>
@@ -179,19 +163,19 @@ export default function Home() {
       {!plan && (
         <section className="empty">
           <div className="terminal">
-            <div className="tbar">blamebox — 80×24</div>
+            <div className="tbar">repodj — 80×24</div>
             <div className="tbody">
               <div>
                 <span className="prompt">$</span>{" "}
-                <span className="cmd">blamebox clone &lt;url&gt;</span>
+                <span className="cmd">repodj spin &lt;url&gt;</span>
               </div>
               <div className="out">
-                two agents. twenty seconds. only strings that already exist in
-                your repo.
+                an automated AI DJ. your repo&apos;s architecture becomes a pure
+                instrumental beat.
               </div>
               <div className="out">
-                HYPE quotes the README. DISS quotes your commits. the beat is
-                computed, not composed.
+                messiness → tempo &amp; genre. languages → instruments. project
+                type → sound FX. no voice, no lyrics.
               </div>
             </div>
           </div>
@@ -203,7 +187,7 @@ export default function Home() {
               autoFocus
             />
             <button className="play-btn" type="submit" disabled={loading}>
-              {loading ? "cloning…" : "blame"}
+              {loading ? "analyzing…" : "analyze"}
             </button>
           </form>
           <div className="demo-links">
@@ -222,189 +206,162 @@ export default function Home() {
         <>
           <div className="physics">
             <div className="cell">
-              <span className="k">seed</span>
-              <span className="v beat">
-                {plan.physics.seed.toString(16).padStart(8, "0")}
-              </span>
+              <span className="k">messiness</span>
+              <span className="v beat">{plan.analysis.messiness_score}/100</span>
+            </div>
+            <div className="cell">
+              <span className="k">genre</span>
+              <span className="v">{plan.spec.genre}</span>
             </div>
             <div className="cell">
               <span className="k">bpm</span>
-              <span className="v">{plan.physics.bpm.toFixed(1)}</span>
+              <span className="v">{plan.spec.bpm}</span>
             </div>
             <div className="cell">
-              <span className="k">chaos</span>
-              <span className="v">{plan.physics.chaos.toFixed(3)}</span>
+              <span className="k">project type</span>
+              <span className="v">{plan.analysis.project_type}</span>
             </div>
             <div className="cell">
-              <span className="k">hypocrisy</span>
-              <span className="v">{plan.physics.hypocrisy.toFixed(3)}</span>
+              <span className="k">commit velocity</span>
+              <span className="v">{plan.analysis.commit_velocity}/day</span>
             </div>
             <div className="cell">
-              <span className="k">night owl</span>
-              <span className="v">
-                {(plan.physics.nightOwl * 100).toFixed(0)}%
+              <span className="k">seed</span>
+              <span className="v beat">
+                {plan.analysis.seed.toString(16).padStart(8, "0")}
               </span>
-            </div>
-            <div className="cell">
-              <span className="k">emphasis</span>
-              <span className="v">{emphasis}</span>
             </div>
           </div>
 
           <div className="stage">
-            {/* left: blame rail */}
+            {/* left: analysis rail */}
             <aside className="rail">
-              <div className="panel-title">blame — evidence</div>
-              <div className="rail-section">readme hunks</div>
-              {plan.tank.readmeLines.map((line, i) => (
-                <div
-                  key={`r${i}`}
-                  className={`blame-row readme-row ${
-                    liveSourceIds.has(`readme:${i}`) ? "firing" : ""
-                  }`}
-                >
-                  <span className="sha">READ</span>
-                  <span className="msg">{line}</span>
-                </div>
-              ))}
-              <div className="rail-section">commit hunks</div>
-              {plan.tank.commits.map((c) => (
-                <div
-                  key={c.sha}
-                  className={`blame-row ${
-                    liveSourceIds.has(`commit:${c.sha}`) ||
-                    liveBar?.sha === c.sha
-                      ? "firing"
-                      : ""
-                  }`}
-                >
-                  <span className="sha">{c.sha.slice(0, 7)}</span>
-                  <span className="msg">{c.message}</span>
-                  <span className="who">{c.author}</span>
-                </div>
-              ))}
-              {plan.tank.files.length > 0 && (
-                <>
-                  <div className="rail-section">files</div>
-                  {plan.tank.files.slice(0, 8).map((f) => (
+              <div className="panel-title">analysis — why it sounds like this</div>
+              <div className="rail-section">messiness breakdown</div>
+              {Object.entries(plan.analysis.breakdown).map(([k, v]) => (
+                <div className="fader-row" key={k}>
+                  <div className="lang">
+                    <span>{BREAKDOWN_LABELS[k] ?? k}</span>
+                    <span className="val">{(v * 100).toFixed(0)}%</span>
+                  </div>
+                  <div className="fader-track">
                     <div
-                      key={f}
-                      className={`blame-row ${
-                        liveSourceIds.has(`file:${f}`) ? "firing" : ""
-                      }`}
-                    >
-                      <span className="sha">FILE</span>
-                      <span className="msg">{f}</span>
-                    </div>
-                  ))}
+                      className="fader-fill messy-fill"
+                      style={{ width: `${Math.min(v, 1) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+              <div className="rail-section">project signals</div>
+              {plan.analysis.project_signals.length === 0 && (
+                <div className="blame-row">
+                  <span className="sha">TYPE</span>
+                  <span className="msg">no strong signals → library</span>
+                </div>
+              )}
+              {plan.analysis.project_signals.map((s) => (
+                <div className="blame-row" key={s}>
+                  <span className="sha">SIG</span>
+                  <span className="msg">{s}</span>
+                </div>
+              ))}
+              <div className="rail-section">mood</div>
+              <div className="blame-row">
+                <span className="sha">MOOD</span>
+                <span className="msg">{plan.spec.mood}</span>
+              </div>
+              {plan.analysis.description && (
+                <>
+                  <div className="rail-section">about</div>
+                  <div className="blame-row">
+                    <span className="msg wrap">{plan.analysis.description}</span>
+                  </div>
                 </>
               )}
             </aside>
 
-            {/* center: transport + battle */}
+            {/* center: deck */}
             <section className="center">
               <div className="transport">
                 <div className="ruler">
-                  {plan.bars.map((b) => (
+                  {[0, 1, 2, 3].map((bar) => (
                     <div
-                      key={b.barIndex}
-                      className={`barcell ${b.side}-bar ${
-                        currentBar === b.barIndex ? "active" : ""
+                      key={bar}
+                      className={`barcell loop-bar ${
+                        currentBar === bar ? "active" : ""
                       }`}
                     >
-                      {b.barIndex + 1}·{b.side}
+                      bar {bar + 1}
                     </div>
                   ))}
                   {playing && (
                     <div
                       className="playhead"
-                      style={{ left: `${(playhead / TOTAL_SECONDS) * 100}%` }}
+                      style={{ left: `${(playhead / loopSeconds) * 100}%` }}
                     />
                   )}
+                </div>
+                <div className="steps">
+                  {Array.from({ length: STEPS }, (_, i) => (
+                    <div
+                      key={i}
+                      className={`step ${i % 4 === 0 ? "beatstep" : ""} ${
+                        playing && step === i ? "on" : ""
+                      }`}
+                    />
+                  ))}
                 </div>
                 <div className="transport-meta">
                   <span>
                     <span className={`kick-lamp ${kickOn ? "on" : ""}`} />
                     kick
                   </span>
-                  <span>{plan.physics.bpm.toFixed(1)} bpm</span>
+                  <span>{plan.spec.bpm} bpm</span>
                   <span>
-                    {playing ? playhead.toFixed(1) : "0.0"}s / {TOTAL_SECONDS}s
+                    {playing ? playhead.toFixed(1) : "0.0"}s /{" "}
+                    {loopSeconds.toFixed(1)}s loop
                   </span>
                   <span>
-                    <kbd>space</kbd> play · <kbd>H</kbd> hype · <kbd>D</kbd>{" "}
-                    diss
+                    <kbd>space</kbd> play / stop
                   </span>
                 </div>
               </div>
 
-              <div className="battle">
-                <div className="col hype-col">
-                  <div className="col-head">HYPE — counsel for the readme</div>
-                  {plan.bars
-                    .filter((b) => b.side === "hype")
-                    .map((b) => (
-                      <div
-                        key={b.barIndex}
-                        className={`bar-card ${
-                          currentBar === b.barIndex ? "live" : ""
-                        } ${firedBars.has(b.barIndex) ? "fired" : ""}`}
-                      >
-                        <div className="meta">
-                          <span>bar {b.barIndex + 1}</span>
-                          <span>
-                            t={(b.barIndex * BAR_SECONDS).toFixed(1)}s
-                          </span>
-                        </div>
-                        <div className="body">
-                          <BarText bar={b} />
-                        </div>
-                        {showSources && (
-                          <div className="sources">
-                            src: {b.sourceIds?.join(", ") ?? "—"}
-                          </div>
-                        )}
-                      </div>
-                    ))}
+              <div className="prompt-card">
+                <div className="prompt-head">
+                  <span>AudioPromptSpec — prompt_string</span>
+                  <button className="copy-btn" onClick={copyPrompt}>
+                    {copied ? "copied" : "copy"}
+                  </button>
                 </div>
-                <div className="col diss-col">
-                  <div className="col-head">DISS — counsel for git history</div>
-                  {plan.bars
-                    .filter((b) => b.side === "diss")
-                    .map((b) => (
-                      <div
-                        key={b.barIndex}
-                        className={`bar-card ${
-                          currentBar === b.barIndex ? "live" : ""
-                        } ${firedBars.has(b.barIndex) ? "fired" : ""}`}
-                      >
-                        <div className="meta">
-                          <span>bar {b.barIndex + 1}</span>
-                          {b.sha && <span>{b.sha.slice(0, 7)}</span>}
-                          <span>
-                            t={(b.barIndex * BAR_SECONDS).toFixed(1)}s
-                          </span>
-                        </div>
-                        <div className="body">
-                          <BarText bar={b} />
-                        </div>
-                        {showSources && (
-                          <div className="sources">
-                            src: {b.sourceIds?.join(", ") ?? "—"}
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                <div className="prompt-body">{plan.spec.prompt_string}</div>
+                <div className="prompt-foot">
+                  paste into any AI music generator — or press play and let the
+                  built-in engine render it live. deterministic: same repo state,
+                  same set.
+                </div>
+              </div>
+
+              <div className="spec-grid">
+                <div className="spec-card">
+                  <div className="spec-title">primary_instruments</div>
+                  {plan.spec.primary_instruments.map((i) => (
+                    <span className="chip" key={i}>
+                      {i}
+                    </span>
+                  ))}
+                </div>
+                <div className="spec-card">
+                  <div className="spec-title">sfx_elements</div>
+                  {plan.spec.sfx_elements.map((s) => (
+                    <span className="chip sfx" key={s}>
+                      {s}
+                    </span>
+                  ))}
                 </div>
               </div>
 
               <label className="debug-row">
-                <input
-                  type="checkbox"
-                  checked={showSources}
-                  onChange={(e) => setShowSources(e.target.checked)}
-                />
-                show sources
                 <span className="spacer" />
                 <button
                   className="badge"
@@ -415,40 +372,44 @@ export default function Home() {
                     setPlan(null);
                   }}
                 >
-                  new battle
+                  new set
                 </button>
               </label>
             </section>
 
-            {/* right: mixer */}
+            {/* right: language crate */}
             <aside className="mixer">
-              <div className="panel-title">mixer — language faders</div>
-              {Object.entries(plan.physics.mixer).map(([ch, gain]) => (
-                <div className="fader-row" key={ch}>
+              <div className="panel-title">crate — language faders</div>
+              {Object.entries(plan.analysis.languages).map(([lang, pct]) => (
+                <div className="fader-row" key={lang}>
                   <div className="lang">
-                    <span>{ch}</span>
-                    <span className="val">{(gain as number).toFixed(2)}</span>
+                    <span>{lang}</span>
+                    <span className="val">{pct}%</span>
                   </div>
                   <div className="fader-track">
                     <div
                       className="fader-fill"
-                      style={{ width: `${Math.min(gain as number, 1) * 100}%` }}
+                      style={{ width: `${Math.min(pct, 100)}%` }}
                     />
                   </div>
                 </div>
               ))}
               <div className="hint">
-                js/ts → kick+hats
+                python → 808s + analog synths
                 <br />
-                python → bass
+                c/c++/rust → industrial guitars
                 <br />
-                rust/go/c → lead
+                js/ts → synth-pop + hi-hats
                 <br />
-                other → pad
+                html/css → acoustic + rhodes
+                <br />
+                go/elixir → electro-funk
+                <br />
+                asm/shell → 8-bit chiptune
                 <br />
                 <br />
-                gains are byte shares from the languages API. the producer is
-                never an LLM.
+                the producer is never an LLM. the beat is computed from repo
+                physics.
               </div>
             </aside>
           </div>

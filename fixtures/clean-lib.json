@@ -1,0 +1,37 @@
+{
+  "owner": "polyglot",
+  "repo": "hexcalm",
+  "description": "A tiny, well-tested hexadecimal parsing library for Rust.",
+  "stars": 2841,
+  "openIssues": 2,
+  "pushedAt": "2026-08-30T10:12:00Z",
+  "languages": { "Rust": 91240, "Shell": 2100 },
+  "treePaths": [
+    "Cargo.toml",
+    "README.md",
+    "LICENSE",
+    "src/lib.rs",
+    "src/parse.rs",
+    "src/encode.rs",
+    "src/error.rs",
+    "tests/parse_test.rs",
+    "tests/encode_test.rs",
+    "tests/roundtrip_test.rs",
+    "benches/bench.rs",
+    "examples/basic.rs",
+    ".github/workflows/ci.yml",
+    "scripts/release.sh"
+  ],
+  "commitDates": [
+    "2026-08-30T10:12:00Z",
+    "2026-08-24T09:40:00Z",
+    "2026-08-19T15:02:00Z",
+    "2026-08-12T11:30:00Z",
+    "2026-08-06T08:55:00Z",
+    "2026-08-01T17:21:00Z",
+    "2026-07-25T13:44:00Z",
+    "2026-07-18T10:05:00Z",
+    "2026-07-09T14:37:00Z",
+    "2026-07-01T09:00:00Z"
+  ]
+}

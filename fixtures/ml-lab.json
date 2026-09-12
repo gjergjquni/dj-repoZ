@@ -1,0 +1,43 @@
+{
+  "owner": "signal-labs",
+  "repo": "torch-atlas",
+  "description": "Machine learning experiments: training pipelines and model zoo.",
+  "stars": 412,
+  "openIssues": 40,
+  "pushedAt": "2026-09-10T18:45:00Z",
+  "languages": { "Python": 264000, "Shell": 9400, "Dockerfile": 1800 },
+  "treePaths": [
+    "README.md",
+    "requirements.txt",
+    "Dockerfile",
+    "setup.py",
+    "notebooks/explore.ipynb",
+    "notebooks/eval_runs.ipynb",
+    "atlas/models/resnet_variant.py",
+    "atlas/models/transformer_block.py",
+    "atlas/train/train_loop.py",
+    "atlas/train/schedulers/warmup/cosine.py",
+    "atlas/data/dataset_loader.py",
+    "atlas/data/augment/pipelines/vision/randaug.py",
+    "atlas/utils/logging.py",
+    "checkpoints/baseline.onnx",
+    "configs/experiments/vision/imagenet/baseline.yaml",
+    "scripts/launch_train.sh",
+    "tests/test_dataset_loader.py",
+    "tests/test_train_loop.py"
+  ],
+  "commitDates": [
+    "2026-09-10T18:45:00Z",
+    "2026-09-10T11:02:00Z",
+    "2026-09-09T16:33:00Z",
+    "2026-09-09T09:15:00Z",
+    "2026-09-08T20:41:00Z",
+    "2026-09-08T10:27:00Z",
+    "2026-09-07T15:58:00Z",
+    "2026-09-07T08:44:00Z",
+    "2026-09-06T19:12:00Z",
+    "2026-09-06T12:05:00Z",
+    "2026-09-05T14:50:00Z",
+    "2026-09-04T18:45:00Z"
+  ]
+}

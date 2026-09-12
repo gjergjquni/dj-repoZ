@@ -91,14 +91,19 @@ a {
   color: var(--comment);
 }
 
-.badge.llm {
+.badge.clean {
   color: var(--hype);
   border-color: var(--hype);
 }
 
-.badge.markov {
-  color: var(--beat);
-  border-color: var(--beat);
+.badge.moderate {
+  color: #58a6ff;
+  border-color: #58a6ff;
+}
+
+.badge.messy {
+  color: var(--diss);
+  border-color: var(--diss);
 }
 
 /* merge-style button */
@@ -257,12 +262,8 @@ a {
   padding: 2px 4px;
 }
 
-.ruler .barcell.hype-bar {
-  box-shadow: inset 0 -2px 0 var(--hype);
-}
-
-.ruler .barcell.diss-bar {
-  box-shadow: inset 0 -2px 0 var(--diss);
+.ruler .barcell.loop-bar {
+  box-shadow: inset 0 -2px 0 var(--beat);
 }
 
 .ruler .barcell.active {
@@ -301,94 +302,123 @@ a {
   box-shadow: 0 0 6px var(--beat);
 }
 
-/* ---------- battle columns (PR review comments) ---------- */
-.battle {
+/* ---------- step sequencer ---------- */
+.steps {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0;
+  grid-template-columns: repeat(64, 1fr);
+  gap: 1px;
+  margin-top: 4px;
 }
 
-.col {
-  padding: 10px;
+.step {
+  height: 10px;
+  background: #21262d;
+  border-radius: 1px;
 }
 
-.col.hype-col {
-  border-right: 1px solid var(--hairline);
+.step.beatstep {
+  background: #2d333b;
 }
 
-.col-head {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  padding-bottom: 8px;
+.step.on {
+  background: var(--beat);
+  box-shadow: 0 0 5px var(--beat);
 }
 
-.hype-col .col-head {
-  color: var(--hype);
-}
-
-.diss-col .col-head {
-  color: var(--diss);
-}
-
-.bar-card {
+/* ---------- prompt card ---------- */
+.prompt-card {
+  margin: 12px;
   border: 1px solid var(--hairline);
   border-radius: 6px;
   background: var(--panel);
-  margin-bottom: 8px;
-  font-size: 12px;
-  opacity: 0.55;
-  transition: opacity 0.2s, border-color 0.2s;
+  overflow: hidden;
 }
 
-.bar-card.fired {
-  opacity: 1;
-}
-
-.bar-card.live {
-  opacity: 1;
-}
-
-.hype-col .bar-card.live {
-  border-color: var(--hype);
-}
-
-.diss-col .bar-card.live {
-  border-color: var(--diss);
-}
-
-.bar-card .meta {
-  padding: 4px 10px;
+.prompt-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
   border-bottom: 1px solid var(--hairline);
   color: var(--comment);
   font-size: 10px;
-  display: flex;
-  gap: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
-.bar-card .body {
-  padding: 8px 10px;
+.copy-btn {
+  background: none;
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  color: var(--beat);
+  font-size: 10px;
+  padding: 2px 10px;
+  cursor: pointer;
 }
 
-.bar-card .q {
-  padding: 0 2px;
+.copy-btn:hover {
+  border-color: var(--beat);
 }
 
-.hype-col .q {
-  background: rgba(63, 185, 80, 0.18);
+.prompt-body {
+  padding: 12px;
+  font-size: 13px;
   color: #7ee787;
+  line-height: 1.7;
 }
 
-.diss-col .q {
-  background: rgba(248, 81, 73, 0.18);
-  color: #ffa198;
-}
-
-.bar-card .sources {
-  padding: 4px 10px;
+.prompt-foot {
+  padding: 6px 12px;
   border-top: 1px dashed var(--hairline);
   color: var(--comment);
   font-size: 10px;
+}
+
+/* ---------- spec cards ---------- */
+.spec-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 0 12px;
+}
+
+.spec-card {
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--panel);
+  padding: 10px 12px;
+}
+
+.spec-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--comment);
+  margin-bottom: 8px;
+}
+
+.chip {
+  display: inline-block;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  padding: 2px 10px;
+  margin: 0 6px 6px 0;
+  font-size: 11px;
+  color: var(--hype);
+  background: rgba(63, 185, 80, 0.08);
+}
+
+.chip.sfx {
+  color: var(--beat);
+  background: rgba(210, 168, 255, 0.08);
+}
+
+.fader-fill.messy-fill {
+  background: var(--diss);
+}
+
+.blame-row .msg.wrap {
+  white-space: normal;
 }
 
 /* ---------- mixer ---------- */
@@ -545,12 +575,7 @@ kbd {
 }
 
 @media (max-width: 600px) {
-  .battle {
+  .spec-grid {
     grid-template-columns: 1fr;
-  }
-
-  .col.hype-col {
-    border-right: none;
-    border-bottom: 1px solid var(--hairline);
   }
 }

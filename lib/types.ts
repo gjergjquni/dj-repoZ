@@ -1,79 +1,81 @@
 import { z } from "zod";
 
-export const CommitSchema = z.object({
-  sha: z.string(),
-  message: z.string(),
-  date: z.string(),
-  author: z.string(),
+/**
+ * Raw snapshot of a repository — either fetched live from the GitHub REST API
+ * or loaded from a bundled fixture. This is the ONLY input to the analyzer,
+ * so fixtures exercise exactly the same scoring code as live repos.
+ */
+export const RawRepoSnapshotSchema = z.object({
+  owner: z.string(),
+  repo: z.string(),
+  description: z.string(),
+  stars: z.number(),
+  openIssues: z.number(),
+  pushedAt: z.string(),
+  languages: z.record(z.string(), z.number()), // bytes per language
+  treePaths: z.array(z.string()), // full file paths from the git tree
+  commitDates: z.array(z.string()), // ISO dates, newest first
 });
 
-export const JokeTankSchema = z.object({
+export type RawRepoSnapshot = z.infer<typeof RawRepoSnapshotSchema>;
+
+export const ProjectTypeSchema = z.enum([
+  "web_app",
+  "web_extension",
+  "ml_project",
+  "cli_tool",
+  "game_engine",
+  "library",
+]);
+
+export type ProjectType = z.infer<typeof ProjectTypeSchema>;
+
+/** Each component is normalized 0..1 before weighting. */
+export const MessinessBreakdownSchema = z.object({
+  issuePressure: z.number(), // open issue ratio
+  churn: z.number(), // commit velocity pressure
+  treeDepth: z.number(), // deep directory trees
+  testGap: z.number(), // lack of test files
+});
+
+export type MessinessBreakdown = z.infer<typeof MessinessBreakdownSchema>;
+
+export const RepoAnalysisSchema = z.object({
   owner: z.string(),
   repo: z.string(),
   description: z.string(),
   stars: z.number(),
   pushedAt: z.string(),
-  languages: z.record(z.string(), z.number()),
-  readmeLines: z.array(z.string()).max(12),
-  commits: z.array(CommitSchema),
-  files: z.array(z.string()),
-  todos: z.array(z.string()),
-});
-
-export type JokeTank = z.infer<typeof JokeTankSchema>;
-export type Commit = z.infer<typeof CommitSchema>;
-
-export const MixerSchema = z.object({
-  kick: z.number(),
-  hats: z.number(),
-  bass: z.number(),
-  lead: z.number(),
-  pad: z.number(),
-});
-
-export type Mixer = z.infer<typeof MixerSchema>;
-
-export const RepoPhysicsSchema = z.object({
   seed: z.number(),
-  bpm: z.number(),
-  chaos: z.number(),
-  hypocrisy: z.number(),
-  nightOwl: z.number(),
-  mixer: MixerSchema,
+  languages: z.record(z.string(), z.number()), // percentages, 0..100
+  messiness_score: z.number().int().min(0).max(100),
+  breakdown: MessinessBreakdownSchema,
+  project_type: ProjectTypeSchema,
+  project_signals: z.array(z.string()), // filenames/keywords that triggered the type
+  commit_velocity: z.number(), // commits per day
 });
 
-export type RepoPhysics = z.infer<typeof RepoPhysicsSchema>;
+export type RepoAnalysis = z.infer<typeof RepoAnalysisSchema>;
 
-export const BarSchema = z.object({
-  barIndex: z.number().int().min(0).max(7),
-  side: z.enum(["hype", "diss"]),
-  text: z.string().max(90),
-  quote: z.string(),
-  sha: z.string().optional(),
-  sourceIds: z.array(z.string()).optional(),
+export const TierSchema = z.enum(["clean", "moderate", "messy"]);
+export type Tier = z.infer<typeof TierSchema>;
+
+/** Structured audio prompt — the contract between the analyzer and any music engine. */
+export const AudioPromptSpecSchema = z.object({
+  genre: z.string(),
+  bpm: z.number().int(),
+  tier: TierSchema,
+  primary_instruments: z.array(z.string()).min(1),
+  mood: z.string(),
+  sfx_elements: z.array(z.string()),
+  prompt_string: z.string(),
 });
 
-export type Bar = z.infer<typeof BarSchema>;
+export type AudioPromptSpec = z.infer<typeof AudioPromptSpecSchema>;
 
-export const BattlePlanSchema = z.object({
-  tank: JokeTankSchema,
-  physics: RepoPhysicsSchema,
-  bars: z.array(BarSchema).length(8),
-  assembler: z.enum(["llm", "markov"]),
+export const DJPlanSchema = z.object({
+  analysis: RepoAnalysisSchema,
+  spec: AudioPromptSpecSchema,
 });
 
-export type BattlePlan = z.infer<typeof BattlePlanSchema>;
-
-/** LLM writer output shapes */
-export const WriterBarSchema = z.object({
-  barIndex: z.number().int(),
-  text: z.string(),
-  quote: z.string(),
-  sha: z.string().optional(),
-});
-
-export const WriterOutputSchema = z.object({
-  bars: z.array(WriterBarSchema),
-});
-
-export type WriterOutput = z.infer<typeof WriterOutputSchema>;
+export type DJPlan = z.infer<typeof DJPlanSchema>;

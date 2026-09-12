@@ -2,34 +2,30 @@
 
 import * as Tone from "tone";
 import { mulberry32 } from "./hash";
-import { BAR_SECONDS, TOTAL_SECONDS } from "./score";
-import type { BattlePlan } from "./types";
+import type { DJPlan } from "./types";
 
 export type PerformerEvents = {
-  onBar?: (barIndex: number) => void;
-  onTick?: (seconds: number) => void;
+  onStep?: (step: number) => void; // 0..63 (4 bars × 16 steps)
+  onTick?: (seconds: number, loopSeconds: number) => void;
   onEnd?: () => void;
 };
 
+export const STEPS = 64; // 4-bar loop, 16th-note grid
+
 /**
- * Deterministic 20-second performance.
- * The beat is pure math from RepoPhysics — the LLM never touches audio.
+ * Pure instrumental DJ engine.
+ * Everything is synthesized live with Tone.js from the AudioPromptSpec —
+ * no samples, no voice, no lyrics. Deterministic from the repo seed:
+ * the same repo state always plays the same set.
  */
 export class Performer {
-  private plan: BattlePlan;
+  private plan: DJPlan;
   private events: PerformerEvents;
   private disposables: { dispose(): void }[] = [];
   private tickRaf = 0;
-  private startedAt = 0;
-  private utterances: SpeechSynthesisUtterance[] = [];
-  private stopTimeout: ReturnType<typeof setTimeout> | null = null;
   playing = false;
-  hypeGainBoost = 1;
-  dissGainBoost = 1;
-  private hypeVol: Tone.Volume | null = null;
-  private dissVol: Tone.Volume | null = null;
 
-  constructor(plan: BattlePlan, events: PerformerEvents = {}) {
+  constructor(plan: DJPlan, events: PerformerEvents = {}) {
     this.plan = plan;
     this.events = events;
   }
@@ -39,170 +35,286 @@ export class Performer {
     await Tone.start();
     this.playing = true;
 
-    const { physics, bars } = this.plan;
-    const { mixer, seed, bpm, chaos, nightOwl } = physics;
-    const rand = mulberry32(seed);
-    const now = Tone.now() + 0.1;
-    this.startedAt = now;
+    const { analysis, spec } = this.plan;
+    const rand = mulberry32(analysis.seed);
+    const tier = spec.tier;
+    const inst = spec.primary_instruments.join(" ");
+    const has = (kw: string) => inst.includes(kw);
 
-    const master = new Tone.Gain(0.9).toDestination();
+    const t = Tone.getTransport();
+    t.bpm.value = spec.bpm;
+    t.loop = true;
+    t.loopStart = 0;
+    t.loopEnd = "4m";
 
-    // channel strips, panned like the columns: hype left, diss right
-    const hypePan = new Tone.Panner(-0.5).connect(master);
-    const dissPan = new Tone.Panner(0.5).connect(master);
-    this.hypeVol = new Tone.Volume(0).connect(hypePan);
-    this.dissVol = new Tone.Volume(0).connect(dissPan);
+    const master = new Tone.Gain(0.85).toDestination();
+    const comp = new Tone.Compressor(-18, 3).connect(master);
+    this.disposables.push(master, comp);
 
+    // ---------- chords per tier (one chord per bar) ----------
+    const PROGRESSIONS: Record<string, string[][]> = {
+      clean: [
+        ["C4", "E4", "G4", "B4"],
+        ["A3", "C4", "E4", "G4"],
+        ["F3", "A3", "C4", "E4"],
+        ["G3", "B3", "D4", "E4"],
+      ],
+      moderate: [
+        ["A3", "C4", "E4", "G4"],
+        ["F3", "A3", "C4"],
+        ["C4", "E4", "G4"],
+        ["G3", "B3", "D4"],
+      ],
+      messy: [
+        ["C3", "Eb3", "G3"],
+        ["C3", "Eb3", "G3"],
+        ["Ab2", "C3", "Eb3"],
+        ["G2", "B2", "D3"],
+      ],
+    };
+    const chords = PROGRESSIONS[tier];
+    const roots = chords.map((c) => c[0]);
+    const bassRoots = roots.map((r) =>
+      r.replace(/\d/, (d) => String(Math.max(1, Number(d) - 2)))
+    );
+
+    // ---------- drums ----------
     const kick = new Tone.MembraneSynth({
-      pitchDecay: 0.04,
+      pitchDecay: tier === "messy" ? 0.02 : 0.05,
       octaves: 6,
-      envelope: { attack: 0.001, decay: 0.35, sustain: 0 },
-      volume: Tone.gainToDb(mixer.kick),
-    }).connect(master);
+      envelope: { attack: 0.001, decay: tier === "clean" ? 0.5 : 0.32, sustain: 0 },
+      volume: -4,
+    }).connect(comp);
 
+    const snare = new Tone.NoiseSynth({
+      noise: { type: "white" },
+      envelope: { attack: 0.001, decay: 0.12, sustain: 0 },
+      volume: tier === "clean" ? -18 : -8,
+    }).connect(comp);
+
+    const hatCrush = new Tone.BitCrusher(has("bitcrushed") || has("chiptune") ? 4 : 16).connect(comp);
     const hat = new Tone.NoiseSynth({
       noise: { type: "white" },
-      envelope: { attack: 0.001, decay: 0.04, sustain: 0 },
-      volume: Tone.gainToDb(mixer.hats * 0.5),
-    }).connect(master);
+      envelope: { attack: 0.001, decay: 0.03, sustain: 0 },
+      volume: -14,
+    }).connect(hatCrush);
 
-    const bass = new Tone.MonoSynth({
-      oscillator: { type: "square" },
-      filter: { type: "lowpass", frequency: 300 } as any,
-      envelope: { attack: 0.005, decay: 0.2, sustain: 0.3, release: 0.1 },
-      volume: Tone.gainToDb(mixer.bass * 0.8),
-    }).connect(master);
+    this.disposables.push(kick, snare, hat, hatCrush);
 
-    const lead = new Tone.Synth({
-      oscillator: { type: "triangle" },
-      envelope: { attack: 0.001, decay: 0.08, sustain: 0, release: 0.05 },
-      volume: Tone.gainToDb(mixer.lead * 0.6),
-    }).connect(master);
+    // step patterns, deterministic from seed
+    const kickPat = new Array<boolean>(STEPS).fill(false);
+    const snarePat = new Array<boolean>(STEPS).fill(false);
+    const hatPat = new Array<number>(STEPS).fill(0); // 0 off, 1 soft, 2 accent
 
-    const pad = new Tone.Noise("pink");
-    const padGain = new Tone.Gain(mixer.pad * 0.12).connect(master);
-    const padFilter = new Tone.Filter(400, "lowpass").connect(padGain);
-    pad.connect(padFilter);
-    pad.start(now);
-    pad.stop(now + TOTAL_SECONDS);
-
-    this.disposables.push(master, hypePan, dissPan, this.hypeVol, this.dissVol, kick, hat, bass, lead, pad, padGain, padFilter);
-
-    // ---- deterministic grid ----
-    const beat = 60 / bpm;
-    const sixteenth = beat / 4;
-    const swing = nightOwl > 0.4 ? sixteenth * 0.3 * nightOwl : 0;
-    const bassNotes = ["C2", "C2", "Eb2", "G1"];
-    const leadNotes = ["C5", "Eb5", "G5", "Bb5"];
-
-    for (let bar = 0; bar < 8; bar++) {
-      const barStart = now + bar * BAR_SECONDS;
-      // kick lands on every bar, plus BPM-aligned kicks inside the bar
-      kick.triggerAttackRelease("C1", 0.1, barStart);
-      for (let b = 1; b * beat < BAR_SECONDS - 0.05; b++) {
-        if (b % 2 === 0 || rand() < 0.3) {
-          kick.triggerAttackRelease("C1", 0.08, barStart + b * beat, 0.7);
-        }
-      }
-      // hats: density from entropy, offbeats when chaotic; swung 8ths when night owl
-      for (let s = 0; s * sixteenth < BAR_SECONDS - 0.03; s++) {
-        const isOffbeat = s % 2 === 1;
-        const p = isOffbeat ? chaos * 0.9 : 0.55 + chaos * 0.3;
-        if (rand() < p) {
-          const swungTime =
-            barStart + s * sixteenth + (isOffbeat ? swing : 0);
-          hat.triggerAttackRelease(0.03, swungTime, isOffbeat ? 0.4 : 0.8);
-        }
-      }
-      // bass: 8ths, gain already from Python bytes
-      if (mixer.bass > 0.05) {
-        for (let e = 0; e * beat * 0.5 < BAR_SECONDS - 0.05; e++) {
-          if (rand() < 0.6) {
-            bass.triggerAttackRelease(
-              bassNotes[e % 4],
-              beat * 0.4,
-              barStart + e * beat * 0.5
-            );
-          }
-        }
-      }
-      // lead blips from Rust/Go/C
-      if (mixer.lead > 0.05) {
-        for (let q = 0; q < 4; q++) {
-          if (rand() < 0.35) {
-            lead.triggerAttackRelease(
-              leadNotes[Math.floor(rand() * 4)],
-              0.08,
-              barStart + q * (BAR_SECONDS / 4) + sixteenth
-            );
-          }
-        }
+    for (let s = 0; s < STEPS; s++) {
+      const beat = Math.floor((s % 16) / 4); // 0..3 inside the bar
+      const sub = s % 4;
+      if (tier === "clean") {
+        kickPat[s] = sub === 0 && (beat === 0 || beat === 2);
+        hatPat[s] = sub === 2 && rand() < 0.4 ? 1 : 0;
+      } else if (tier === "moderate") {
+        kickPat[s] = sub === 0; // four on the floor
+        snarePat[s] = sub === 0 && (beat === 1 || beat === 3);
+        hatPat[s] = sub === 2 ? 2 : rand() < 0.25 ? 1 : 0;
+      } else {
+        // messy: broken kicks, backbeat + ghost snares, dense hats
+        kickPat[s] = (sub === 0 && beat === 0) || rand() < 0.28;
+        snarePat[s] =
+          (sub === 0 && (beat === 1 || beat === 3)) || rand() < 0.12;
+        hatPat[s] = rand() < 0.75 ? (s % 2 === 1 ? 1 : 2) : 0;
       }
     }
 
-    // ---- voices: 8 utterances locked to bar starts (16th-note grid origin) ----
-    const synth = typeof window !== "undefined" ? window.speechSynthesis : undefined;
-    if (synth) {
-      synth.cancel();
-      const voices = synth.getVoices();
-      const enVoices = voices.filter((v) => v.lang.startsWith("en"));
-      const hypeVoice = enVoices[0] ?? voices[0];
-      const dissVoice = enVoices.length > 1 ? enVoices[enVoices.length - 1] : hypeVoice;
+    // ---------- bass ----------
+    const bassIs808 = has("808");
+    const bassDistorted = has("distorted") || has("industrial");
+    const bassDist = new Tone.Distortion(bassDistorted ? 0.6 : 0).connect(comp);
+    const bass = bassIs808
+      ? new Tone.MembraneSynth({
+          pitchDecay: 0.08,
+          octaves: 2,
+          oscillator: { type: "sine" },
+          envelope: { attack: 0.001, decay: 0.6, sustain: 0.05 },
+          volume: -6,
+        }).connect(bassDist)
+      : new Tone.MonoSynth({
+          oscillator: { type: bassDistorted ? "square" : has("funk") ? "sawtooth" : "triangle" },
+          filter: { type: "lowpass", Q: 2 } as any,
+          filterEnvelope: {
+            attack: 0.005, decay: 0.15, sustain: 0.4, release: 0.1,
+            baseFrequency: 120, octaves: 2.2,
+          } as any,
+          envelope: { attack: 0.004, decay: 0.25, sustain: 0.3, release: 0.1 },
+          volume: -8,
+        }).connect(bassDist);
+    this.disposables.push(bass, bassDist);
 
-      for (const bar of bars) {
-        const u = new SpeechSynthesisUtterance(bar.text);
-        const isHype = bar.side === "hype";
-        u.pitch = isHype ? 1.5 : 0.6;
-        u.rate = isHype ? 1.15 : nightOwl > 0.4 ? 0.85 : 0.95;
-        u.volume = isHype ? this.hypeGainBoost : this.dissGainBoost;
-        u.voice = isHype ? hypeVoice : dissVoice;
-        this.utterances.push(u);
-        const delayMs = (bar.barIndex * BAR_SECONDS + 0.12) * 1000;
-        const t = setTimeout(() => {
-          if (!this.playing) return;
-          u.volume = Math.min(bar.side === "hype" ? this.hypeGainBoost : this.dissGainBoost, 1);
-          synth.speak(u);
-        }, delayMs);
-        this.stoppers.push(t);
+    const bassPat = new Array<boolean>(STEPS).fill(false);
+    for (let s = 0; s < STEPS; s++) {
+      const sub = s % 4;
+      if (tier === "clean") bassPat[s] = s % 16 === 0;
+      else if (tier === "moderate") bassPat[s] = sub === 0 || (sub === 2 && rand() < 0.5);
+      else bassPat[s] = sub === 0 || rand() < 0.2;
+    }
+
+    // ---------- chords / keys / pad ----------
+    const wantsPiano = has("piano") || has("keys") || has("rhodes") || tier === "clean";
+    const wantsPad = has("pad") || has("strings") || has("analog synths");
+    const wantsGuitarStab = has("metal guitar");
+
+    const keySynth = new Tone.PolySynth(Tone.FMSynth, {
+      harmonicity: wantsPiano ? 3 : 1.5,
+      modulationIndex: wantsPiano ? 8 : 4,
+      envelope: { attack: wantsPiano ? 0.004 : 0.02, decay: 0.7, sustain: 0.12, release: 0.6 },
+      volume: -16,
+    } as any).connect(comp);
+    this.disposables.push(keySynth);
+
+    let pad: Tone.PolySynth | null = null;
+    if (wantsPad) {
+      const padFilter = new Tone.Filter(900, "lowpass").connect(comp);
+      pad = new Tone.PolySynth(Tone.Synth, {
+        oscillator: { type: "sawtooth" },
+        envelope: { attack: 0.6, decay: 0.5, sustain: 0.5, release: 1.2 },
+        volume: -22,
+      } as any).connect(padFilter);
+      this.disposables.push(pad, padFilter);
+    }
+
+    let stab: Tone.MonoSynth | null = null;
+    if (wantsGuitarStab) {
+      const stabDist = new Tone.Distortion(0.8).connect(comp);
+      stab = new Tone.MonoSynth({
+        oscillator: { type: "sawtooth" },
+        filter: { type: "lowpass", Q: 4 } as any,
+        filterEnvelope: {
+          attack: 0.002, decay: 0.12, sustain: 0.1, release: 0.05,
+          baseFrequency: 300, octaves: 2.5,
+        } as any,
+        envelope: { attack: 0.002, decay: 0.18, sustain: 0.05, release: 0.05 },
+        volume: -14,
+      }).connect(stabDist);
+      this.disposables.push(stab, stabDist);
+    }
+
+    // ---------- lead / arpeggio ----------
+    const wantsArp = has("arpeggios") || tier === "moderate";
+    const wantsChip = has("chiptune");
+    let lead: Tone.Synth | null = null;
+    if (wantsArp || wantsChip) {
+      const leadOut: Tone.ToneAudioNode = wantsChip
+        ? new Tone.BitCrusher(4).connect(comp)
+        : new Tone.Filter(2400, "lowpass").connect(comp);
+      lead = new Tone.Synth({
+        oscillator: { type: wantsChip ? "square" : "triangle" },
+        envelope: { attack: 0.002, decay: 0.09, sustain: 0, release: 0.05 },
+        volume: wantsChip ? -16 : -18,
+      }).connect(leadOut);
+      this.disposables.push(lead, leadOut);
+    }
+
+    // ---------- project-type SFX ----------
+    const sfxSynth = new Tone.Synth({
+      oscillator: { type: "sine" },
+      envelope: { attack: 0.001, decay: 0.12, sustain: 0, release: 0.08 },
+      volume: -16,
+    }).connect(comp);
+    const glitch = new Tone.NoiseSynth({
+      noise: { type: "pink" },
+      envelope: { attack: 0.001, decay: 0.05, sustain: 0 },
+      volume: -18,
+    }).connect(comp);
+    this.disposables.push(sfxSynth, glitch);
+
+    if (analysis.project_type === "library") {
+      // soft vinyl crackle bed
+      const crackle = new Tone.Noise("pink");
+      const crackleGain = new Tone.Gain(0.015).connect(master);
+      crackle.connect(crackleGain).start();
+      this.disposables.push(crackle, crackleGain);
+    }
+
+    const fireSfx = (time: number, step: number) => {
+      const type = analysis.project_type;
+      if (type === "web_app") {
+        // UI chime: two quick ascending sines
+        sfxSynth.triggerAttackRelease("E6", 0.08, time);
+        sfxSynth.triggerAttackRelease("B6", 0.08, time + 0.09);
+      } else if (type === "web_extension") {
+        // notification pop
+        sfxSynth.triggerAttackRelease("G6", 0.05, time);
+      } else if (type === "ml_project") {
+        // glitchy stutter burst
+        for (let i = 0; i < 3; i++) glitch.triggerAttackRelease(0.02, time + i * 0.04);
+      } else if (type === "cli_tool") {
+        // keyboard clack
+        glitch.triggerAttackRelease(0.015, time);
+      } else if (type === "game_engine") {
+        // coin chime
+        sfxSynth.triggerAttackRelease("B5", 0.05, time);
+        sfxSynth.triggerAttackRelease("E6", 0.12, time + 0.06);
       }
+      void step;
+    };
+
+    // steps where SFX fire (sparse, deterministic)
+    const sfxSteps = new Set<number>();
+    for (let bar = 0; bar < 4; bar++) {
+      if (rand() < 0.8) sfxSteps.add(bar * 16 + 8 + Math.floor(rand() * 4));
     }
 
-    // bar highlight callbacks
-    for (const bar of bars) {
-      const t = setTimeout(() => {
-        if (this.playing) this.events.onBar?.(bar.barIndex);
-      }, bar.barIndex * BAR_SECONDS * 1000);
-      this.stoppers.push(t);
-    }
+    // ---------- sequencer ----------
+    const stepIdx = Array.from({ length: STEPS }, (_, i) => i);
+    const seq = new Tone.Sequence(
+      (time, s) => {
+        const bar = Math.floor(s / 16);
+        if (kickPat[s]) kick.triggerAttackRelease("C1", 0.1, time);
+        if (snarePat[s]) snare.triggerAttackRelease(0.08, time);
+        if (hatPat[s] > 0) hat.triggerAttackRelease(0.03, time, hatPat[s] === 2 ? 0.8 : 0.4);
+        if (bassPat[s]) {
+          bass.triggerAttackRelease(bassRoots[bar], tier === "clean" ? "2n" : "8n", time);
+        }
+        if (s % 16 === 0) {
+          keySynth.triggerAttackRelease(chords[bar], tier === "clean" ? "1m" : "2n", time);
+          pad?.triggerAttackRelease(chords[bar], "1m", time, 0.6);
+        }
+        if (stab && s % 8 === 4) {
+          stab.triggerAttackRelease(roots[bar].replace(/\d/, "2"), "16n", time);
+        }
+        if (lead && s % 2 === 0) {
+          const notes = chords[bar];
+          const n = notes[(s / 2) % notes.length].replace(/\d/, (d) => String(Number(d) + 1));
+          if (tier !== "clean" || s % 8 === 0) lead.triggerAttackRelease(n, "16n", time, 0.5);
+        }
+        if (sfxSteps.has(s)) fireSfx(time, s);
+        Tone.getDraw().schedule(() => {
+          if (this.playing) this.events.onStep?.(s);
+        }, time);
+      },
+      stepIdx,
+      "16n"
+    ).start(0);
+    this.disposables.push(seq);
 
-    // playhead
+    t.start("+0.05");
+
+    const loopSeconds = (60 / spec.bpm) * 16; // 4 bars of 4/4
     const tick = () => {
       if (!this.playing) return;
-      const elapsed = Tone.now() - this.startedAt;
-      this.events.onTick?.(Math.max(0, Math.min(elapsed, TOTAL_SECONDS)));
+      const secs = t.seconds % loopSeconds;
+      this.events.onTick?.(secs, loopSeconds);
       this.tickRaf = requestAnimationFrame(tick);
     };
     this.tickRaf = requestAnimationFrame(tick);
-
-    // exactly 20 seconds then stop
-    this.stopTimeout = setTimeout(() => this.stop(), TOTAL_SECONDS * 1000 + 150);
-  }
-
-  private stoppers: ReturnType<typeof setTimeout>[] = [];
-
-  setSideVolume(side: "hype" | "diss", boost: number) {
-    if (side === "hype") this.hypeGainBoost = boost;
-    else this.dissGainBoost = boost;
   }
 
   stop() {
     if (!this.playing) return;
     this.playing = false;
-    if (this.stopTimeout) clearTimeout(this.stopTimeout);
-    for (const t of this.stoppers) clearTimeout(t);
-    this.stoppers = [];
     cancelAnimationFrame(this.tickRaf);
-    if (typeof window !== "undefined") window.speechSynthesis?.cancel();
+    const t = Tone.getTransport();
+    t.stop();
+    t.cancel();
     for (const d of this.disposables) {
       try {
         d.dispose();

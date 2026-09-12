@@ -3,44 +3,32 @@
   "repo": "final-project-FINAL",
   "description": "school project pls work",
   "stars": 1,
+  "openIssues": 4,
   "pushedAt": "2026-05-19T02:37:00Z",
   "languages": { "JavaScript": 48213, "HTML": 22110, "CSS": 15400, "Python": 8090 },
-  "readmeLines": [
-    "# final-project-FINAL",
-    "My final project for CS102.",
-    "A revolutionary task management solution.",
-    "Built with cutting edge web technologies.",
-    "100% test coverage planned.",
-    "To run: open index.html and pray"
-  ],
-  "commits": [
-    { "sha": "a1b2c3d", "message": "final version", "date": "2026-05-19T02:37:00Z", "author": "dkozlov04" },
-    { "sha": "b2c3d4e", "message": "final version 2", "date": "2026-05-19T02:31:00Z", "author": "dkozlov04" },
-    { "sha": "c3d4e5f", "message": "ACTUAL final version", "date": "2026-05-19T02:14:00Z", "author": "dkozlov04" },
-    { "sha": "d4e5f6a", "message": "asdfasdf", "date": "2026-05-19T01:58:00Z", "author": "dkozlov04" },
-    { "sha": "e5f6a7b", "message": "it works dont touch it", "date": "2026-05-19T01:22:00Z", "author": "dkozlov04" },
-    { "sha": "f6a7b8c", "message": "removed console logs (most of them)", "date": "2026-05-19T00:49:00Z", "author": "dkozlov04" },
-    { "sha": "a7b8c9d", "message": "added everything", "date": "2026-05-18T23:15:00Z", "author": "dkozlov04" },
-    { "sha": "b8c9d0e", "message": "undo the thing from before", "date": "2026-05-18T22:58:00Z", "author": "dkozlov04" },
-    { "sha": "c9d0e1f", "message": "copy paste from stackoverflow but it works", "date": "2026-05-18T22:31:00Z", "author": "dkozlov04" },
-    { "sha": "d0e1f2a", "message": "initial commit", "date": "2026-05-11T14:02:00Z", "author": "dkozlov04" }
-  ],
-  "files": [
+  "treePaths": [
     "index.html",
     "index2.html",
     "index_old_BACKUP.html",
     "script.js",
     "script - Copy.js",
     "untitled1.py",
-    "New folder",
     "style.css",
     "style_new_FINAL.css",
-    "notes.txt"
+    "notes.txt",
+    "New folder/stuff/old versions/script_v2_FINAL.js",
+    "New folder/stuff/old versions/backup/index_REAL_final.html"
   ],
-  "todos": [
-    "removed console logs (most of them)",
-    "To run: open index.html and pray",
-    "script - Copy.js",
-    "index_old_BACKUP.html"
+  "commitDates": [
+    "2026-05-19T02:37:00Z",
+    "2026-05-19T02:31:00Z",
+    "2026-05-19T02:14:00Z",
+    "2026-05-19T01:58:00Z",
+    "2026-05-19T01:22:00Z",
+    "2026-05-19T00:49:00Z",
+    "2026-05-18T23:15:00Z",
+    "2026-05-18T22:58:00Z",
+    "2026-05-18T22:31:00Z",
+    "2026-05-18T21:40:00Z"
   ]
 }

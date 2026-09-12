@@ -1,19 +1,5 @@
 /* Acceptance checks against a running dev server. */
 const BASE = "http://localhost:3000";
-const FORBIDDEN =
-  /\b(yo|lit|fire|sick|vibe|drop the beat|ladies and gentlemen|check it|rap god|let'?s go)\b/i;
-
-function tankStrings(tank) {
-  return [
-    tank.description,
-    tank.repo,
-    tank.owner + "/" + tank.repo,
-    ...tank.readmeLines,
-    ...tank.commits.map((c) => c.message),
-    ...tank.files,
-    ...tank.todos,
-  ].filter(Boolean);
-}
 
 let failures = 0;
 function check(name, ok, detail = "") {
@@ -21,69 +7,72 @@ function check(name, ok, detail = "") {
   if (!ok) failures++;
 }
 
-for (const fixture of ["student-mess", "linux-ish", "react-ish"]) {
-  const res = await fetch(`${BASE}/api/battle?demo=1&fixture=${fixture}`);
+const EXPECTED_TIER = {
+  "clean-lib": "clean",
+  "ml-lab": "moderate",
+  "student-mess": "messy",
+};
+
+const BPM_RANGE = {
+  clean: [70, 95],
+  moderate: [100, 125],
+  messy: [140, 185],
+};
+
+for (const fixture of Object.keys(EXPECTED_TIER)) {
+  const res = await fetch(`${BASE}/api/dj?demo=1&fixture=${fixture}`);
   check(`[${fixture}] demo=1 responds 200`, res.ok, String(res.status));
   if (!res.ok) continue;
   const plan = await res.json();
+  const { analysis, spec } = plan;
 
-  check(`[${fixture}] 8 bars`, plan.bars.length === 8);
-
-  const strings = tankStrings(plan.tank);
-  const badQuote = plan.bars.find(
-    (b) => !strings.some((s) => s.includes(b.quote))
-  );
   check(
-    `[${fixture}] every quote is verbatim tank substring`,
-    !badQuote,
-    badQuote && JSON.stringify(badQuote)
+    `[${fixture}] tier is ${EXPECTED_TIER[fixture]}`,
+    spec.tier === EXPECTED_TIER[fixture],
+    `got ${spec.tier} (score ${analysis.messiness_score})`
   );
 
-  const badText = plan.bars.find((b) => !b.text.includes(b.quote));
-  check(`[${fixture}] every bar text contains its quote`, !badText,
-    badText && JSON.stringify(badText));
-
-  const tooLong = plan.bars.find((b) => b.text.length > 90);
-  check(`[${fixture}] bars <= 90 chars`, !tooLong, tooLong && tooLong.text);
-
-  const cringe = plan.bars.find((b) => FORBIDDEN.test(b.text));
-  check(`[${fixture}] no forbidden words`, !cringe, cringe && cringe.text);
-
-  const sides = plan.bars.map((b) => b.side);
+  const [lo, hi] = BPM_RANGE[spec.tier];
   check(
-    `[${fixture}] hype/diss alternation respects hypocrisy rule`,
-    plan.physics.hypocrisy > 0.55
-      ? sides[6] === "diss" && sides[7] === "diss"
-      : plan.physics.hypocrisy < 0.25
-        ? sides[7] === "hype"
-        : sides.join() === "hype,diss,hype,diss,hype,diss,hype,diss"
+    `[${fixture}] bpm ${spec.bpm} within ${lo}-${hi}`,
+    spec.bpm >= lo && spec.bpm <= hi
   );
 
-  // determinism: same fixture again → same seed, bpm, same bar texts
+  check(
+    `[${fixture}] prompt_string is instrumental-only`,
+    spec.prompt_string.includes("no voice, no lyrics, pure instrumental"),
+    spec.prompt_string
+  );
+
+  check(
+    `[${fixture}] prompt_string carries bpm + genre + instruments`,
+    spec.prompt_string.includes(`${spec.bpm} BPM`) &&
+      spec.prompt_string.includes(spec.genre) &&
+      spec.primary_instruments.every((i) => spec.prompt_string.includes(i))
+  );
+
+  check(
+    `[${fixture}] has instruments and sfx`,
+    spec.primary_instruments.length > 0 && spec.sfx_elements.length > 0
+  );
+
+  // determinism: same fixture again → identical plan
   const plan2 = await (
-    await fetch(`${BASE}/api/battle?demo=1&fixture=${fixture}`)
+    await fetch(`${BASE}/api/dj?demo=1&fixture=${fixture}`)
   ).json();
   check(
-    `[${fixture}] deterministic seed+bpm`,
-    plan2.physics.seed === plan.physics.seed &&
-      plan2.physics.bpm === plan.physics.bpm
+    `[${fixture}] deterministic plan`,
+    JSON.stringify(plan2) === JSON.stringify(plan)
   );
-  if (plan.assembler === "markov") {
-    check(
-      `[${fixture}] deterministic markov bars`,
-      JSON.stringify(plan2.bars) === JSON.stringify(plan.bars)
-    );
-  }
+
   console.log(
-    `      assembler=${plan.assembler} bpm=${plan.physics.bpm.toFixed(1)} chaos=${plan.physics.chaos.toFixed(3)} hyp=${plan.physics.hypocrisy.toFixed(3)} night=${plan.physics.nightOwl.toFixed(2)}`
+    `      score=${analysis.messiness_score} tier=${spec.tier} bpm=${spec.bpm} type=${analysis.project_type} genre="${spec.genre}"`
   );
-  for (const b of plan.bars) {
-    console.log(`      bar${b.barIndex} [${b.side}] ${b.text}`);
-  }
+  console.log(`      prompt: ${spec.prompt_string}`);
 }
 
 // error handling: bad params
-const bad = await fetch(`${BASE}/api/battle`);
+const bad = await fetch(`${BASE}/api/dj`);
 check("missing params → 400", bad.status === 400);
 
 console.log(failures === 0 ? "\nALL CHECKS PASSED" : `\n${failures} FAILURES`);

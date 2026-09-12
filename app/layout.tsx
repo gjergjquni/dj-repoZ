@@ -9,9 +9,9 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "blamebox — git log, but it fights you",
+  title: "repodj — your codebase, but it slaps",
   description:
-    "Paste a public GitHub repo; two constrained agents fight a 20-second blame battle using only strings that already exist in that repo.",
+    "An automated AI DJ: paste a public GitHub repo and its architecture becomes a pure instrumental beat — messiness sets the tempo and genre, languages pick the instruments, project type adds the sound FX.",
 };
 
 export const viewport: Viewport = {

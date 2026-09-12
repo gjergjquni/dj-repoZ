@@ -1,8 +1,10 @@
-# blamebox — git log, but it fights you
+# repodj — your codebase, but it slaps
 
-Paste a public GitHub repo; two constrained agents fight a 20-second blame battle using only strings that already exist in that repo, over a beat computed from its commit history.
+An automated AI DJ: paste a public GitHub repo and its architecture becomes a pure instrumental beat. No voice, no lyrics.
 
-- Run: `npm install && npm run dev` → http://localhost:3000
-- Test: `npm test` (math layer: BPM clamp, entropy, Jaccard hypocrisy)
-- Env (`.env.local`, all optional): `GITHUB_TOKEN=`, `GROQ_API_KEY=` (or `OPENAI_API_KEY=`)
-- No keys? The Markov assembler writes the bars and `?demo=1` uses bundled fixtures.
+- Messiness score (issues, churn, tree depth, missing tests) → tempo & genre: clean = classical/lo-fi 70–95 BPM, moderate = house/synthwave 100–125 BPM, messy = breakcore/DnB 140–185 BPM.
+- Language byte shares → instrument palette (Python = 808s + analog synths, Rust/C = industrial guitars, JS/TS = synth-pop, HTML/CSS = acoustic + rhodes, Go/Elixir = electro-funk, ASM/Shell = chiptune).
+- Project type (`manifest.json`, `requirements.txt`, `index.html`, `cmd/`, shaders) → sound FX drops.
+- Output is a structured `AudioPromptSpec` with a copyable `prompt_string` for any AI music generator; the built-in Tone.js engine renders it live, deterministically from the repo seed.
+- Run: `npm install && npm run dev` → http://localhost:3000 · Test: `npm test`
+- Env (`.env.local`, optional): `GITHUB_TOKEN=` (higher rate limits). No key? `?demo=1` fixtures still play.
